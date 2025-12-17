@@ -9,15 +9,11 @@ import io
 import matplotlib
 matplotlib.use('Agg')  # Use non-interactive backend
 import matplotlib.pyplot as plt
-import seaborn as sns
 from preprocess import TOIDataPreprocessor
 import traceback
 from dotenv import load_dotenv
 import json
 from datetime import datetime
-import threading
-import time
-import webbrowser
 
 # Load environment variables
 load_dotenv()
@@ -493,66 +489,10 @@ def health_check():
 
 @app.route('/train', methods=['POST'])
 def train_model():
-    """Train the TOI model"""
-    global model, preprocessor, label_encoder
-    
-    try:
-        if 'file' not in request.files:
-            return jsonify({'error': 'No file provided'}), 400
-        
-        file = request.files['file']
-        if file.filename == '':
-            return jsonify({'error': 'No file selected'}), 400
-        
-        # Save uploaded file temporarily
-        file_path = f"temp_{file.filename}"
-        file.save(file_path)
-        
-        # Initialize preprocessor
-        preprocessor = TOIDataPreprocessor()
-        
-        # Preprocess data
-        X, y = preprocessor.preprocess_pipeline(file_path)
-        
-        # Split data
-        from sklearn.model_selection import train_test_split
-        X_train, X_test, y_train, y_test = train_test_split(
-            X, y, test_size=0.2, random_state=42, stratify=y
-        )
-        
-        # Train model
-        model = TOIModel()
-        model.train(X_train, y_train)
-        
-        # Evaluate model
-        evaluation = model.evaluate(X_test, y_test)
-        
-        # Record training session
-        feature_names = preprocessor.selected_features if preprocessor else [f'feature_{i}' for i in range(X_train.shape[1])]
-        training_record = performance_tracker.record_training_session(
-            X_train, y_train, X_test, y_test, evaluation, feature_names
-        )
-        
-        # Save model and preprocessor
-        model.save_model('model.pkl')
-        preprocessor.save_preprocessor('preprocessor.pkl')
-        label_encoder = preprocessor.label_encoder
-        
-        # Clean up
-        os.remove(file_path)
-        
-        return jsonify({
-            'success': True,
-            'message': 'Model trained successfully',
-            'evaluation': evaluation,
-            'class_names': label_encoder.classes_.tolist(),
-            'training_record': training_record
-        })
-        
-    except Exception as e:
-        print(f"❌ Training error: {e}")
-        traceback.print_exc()
-        return jsonify({'error': str(e)}), 500
+    """Training is disabled for Hugging Face deployment"""
+    return jsonify({
+        'error': 'Training is disabled on Hugging Face deployment'
+    }), 403
 
 @app.route('/predict', methods=['POST'])
 def predict():
@@ -727,82 +667,10 @@ def record_prediction_for_training():
 
 @app.route('/model/retrain_with_new_data', methods=['POST'])
 def retrain_with_new_data():
-    """Retrain model with accumulated prediction data"""
-    global model, preprocessor
-    
-    try:
-        if not model or not model.is_trained:
-            return jsonify({'error': 'No base model to retrain'}), 400
-        
-        # Get recorded predictions that have actual classes
-        live_predictions = performance_tracker.performance_data['live_predictions']
-        labeled_predictions = [pred for pred in live_predictions if pred.get('actual_class')]
-        
-        if len(labeled_predictions) < 10:
-            return jsonify({
-                'error': f'Need at least 10 labeled predictions for retraining. Currently have {len(labeled_predictions)}'
-            }), 400
-        
-        # Convert predictions to training data format
-        new_features = []
-        new_labels = []
-        
-        for pred in labeled_predictions:
-            # Extract features from prediction record
-            features = extract_features_from_prediction(pred)
-            if features is not None:
-                new_features.append(features)
-                new_labels.append(pred['actual_class'])
-        
-        if len(new_features) == 0:
-            return jsonify({'error': 'Could not extract features from predictions'}), 400
-        
-        # Combine with original training data or retrain from scratch
-        # For simplicity, we'll retrain with the new data
-        X_new = np.array(new_features)
-        y_new = np.array(new_labels)
-        
-        # Encode labels if needed
-        if preprocessor and preprocessor.label_encoder:
-            y_encoded = preprocessor.label_encoder.transform(y_new)
-        else:
-            # Create new label encoder
-            from sklearn.preprocessing import LabelEncoder
-            label_encoder = LabelEncoder()
-            y_encoded = label_encoder.fit_transform(y_new)
-        
-        # Split data
-        from sklearn.model_selection import train_test_split
-        X_train, X_test, y_train, y_test = train_test_split(
-            X_new, y_encoded, test_size=0.2, random_state=42, stratify=y_encoded
-        )
-        
-        # Retrain model
-        model.train(X_train, y_train)
-        
-        # Evaluate
-        evaluation = model.evaluate(X_test, y_test)
-        
-        # Record training session
-        feature_names = preprocessor.selected_features if preprocessor else [f'feature_{i}' for i in range(X_train.shape[1])]
-        training_record = performance_tracker.record_training_session(
-            X_train, y_train, X_test, y_test, evaluation, feature_names
-        )
-        
-        # Save updated model
-        model.save_model('model.pkl')
-        
-        return jsonify({
-            'success': True,
-            'message': f'Model retrained with {len(new_features)} new samples',
-            'evaluation': evaluation,
-            'training_record': training_record
-        })
-        
-    except Exception as e:
-        print(f"Retraining error: {e}")
-        traceback.print_exc()
-        return jsonify({'error': str(e)}), 500
+    """Retraining disabled on Hugging Face deployment"""
+    return jsonify({
+        'error': 'Retraining is disabled on Hugging Face deployment'
+    }), 403
 
 def extract_features_from_prediction(prediction_record):
     """Extract features from prediction record for retraining"""
@@ -873,190 +741,17 @@ def get_prediction_explanation(predicted_class, confidence, input_features):
     else:
         return base_explanation
 
-# Auto Visualizer
-class AutoVisualizer:
-    def __init__(self, app_port=5001, visualizer_port=5002):
-        self.app_port = app_port
-        self.visualizer_port = visualizer_port
-        
-    def start_visualizer(self):
-        """Start the visualizer web interface"""
-        from flask import Flask as VisualizerFlask
-        visualizer_app = VisualizerFlask(__name__)
-        
-        @visualizer_app.route('/')
-        def dashboard():
-            """Main performance dashboard"""
-            try:
-                # Get performance data from main app
-                import requests
-                response = requests.get(f'http://localhost:{self.app_port}/model/performance')
-                if response.status_code == 200:
-                    data = response.json()
-                    
-                    # Generate HTML dashboard
-                    html = self.generate_dashboard_html(data)
-                    return html
-                else:
-                    return f"<h1>Error connecting to model server</h1><p>{response.text}</p>"
-                    
-            except Exception as e:
-                return f"<h1>Visualizer Error</h1><p>{str(e)}</p>"
-        
-        print(f"📊 Starting Model Performance Visualizer on port {self.visualizer_port}...")
-        threading.Thread(
-            target=lambda: visualizer_app.run(
-                host='0.0.0.0', 
-                port=self.visualizer_port, 
-                debug=False, 
-                use_reloader=False
-            )
-        ).start()
-        
-        # Wait a moment for server to start, then open browser
-        time.sleep(2)
-        print(f"🌐 Opening dashboard at http://localhost:{self.visualizer_port}")
-        webbrowser.open(f'http://localhost:{self.visualizer_port}')
-    
-    def generate_dashboard_html(self, data):
-        """Generate HTML dashboard with performance metrics"""
-        
-        performance = data.get('performance_summary', {})
-        charts = data.get('charts', {})
-        suggestions = data.get('suggestions', [])
-        
-        html = f"""
-        <!DOCTYPE html>
-        <html lang="en">
-        <head>
-            <meta charset="UTF-8">
-            <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            <title>TOI Model Performance Dashboard</title>
-            <style>
-                body {{ font-family: Arial, sans-serif; margin: 20px; background-color: #f5f5f5; }}
-                .dashboard {{ max-width: 1200px; margin: 0 auto; }}
-                .header {{ background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 20px; border-radius: 10px; margin-bottom: 20px; }}
-                .metrics-grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; margin-bottom: 20px; }}
-                .metric-card {{ background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); text-align: center; }}
-                .metric-value {{ font-size: 24px; font-weight: bold; color: #333; }}
-                .metric-label {{ font-size: 14px; color: #666; margin-top: 5px; }}
-                .charts-grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(400px, 1fr)); gap: 20px; margin-bottom: 20px; }}
-                .chart-container {{ background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }}
-                .suggestions {{ background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }}
-                .suggestion-item {{ padding: 10px; margin: 5px 0; background: #e3f2fd; border-left: 4px solid #2196f3; }}
-                .trend-improving {{ color: #4caf50; }}
-                .trend-declining {{ color: #f44336; }}
-                .trend-stable {{ color: #ff9800; }}
-            </style>
-        </head>
-        <body>
-            <div class="dashboard">
-                <div class="header">
-                    <h1>🚀 TOI Model Performance Dashboard</h1>
-                    <p>Real-time monitoring of your exoplanet classification model</p>
-                </div>
-                
-                <div class="metrics-grid">
-                    <div class="metric-card">
-                        <div class="metric-value">{performance.get('current_accuracy', 0):.3f}</div>
-                        <div class="metric-label">Current Accuracy</div>
-                    </div>
-                    <div class="metric-card">
-                        <div class="metric-value">{performance.get('best_accuracy', 0):.3f}</div>
-                        <div class="metric-label">Best Accuracy</div>
-                    </div>
-                    <div class="metric-card">
-                        <div class="metric-value">{performance.get('training_samples', 0)}</div>
-                        <div class="metric-label">Training Samples</div>
-                    </div>
-                    <div class="metric-card">
-                        <div class="metric-value">{performance.get('total_predictions', 0)}</div>
-                        <div class="metric-label">Total Predictions</div>
-                    </div>
-                    <div class="metric-card">
-                        <div class="metric-value {f'trend-{performance.get("accuracy_trend", "unknown")}'}">
-                            {performance.get('accuracy_trend', 'unknown').title()}
-                        </div>
-                        <div class="metric-label">Accuracy Trend</div>
-                    </div>
-                </div>
-                
-                <div class="charts-grid">
-                    {self.generate_chart_html(charts)}
-                </div>
-                
-                <div class="suggestions">
-                    <h3>💡 Training Suggestions</h3>
-                    {"".join([f'<div class="suggestion-item">{suggestion}</div>' for suggestion in suggestions])}
-                    {'' if suggestions else '<p>No suggestions at this time. Model is performing well!</p>'}
-                </div>
-                
-                <div style="text-align: center; margin-top: 20px; color: #666;">
-                    <p>Last updated: {time.strftime('%Y-%m-%d %H:%M:%S')}</p>
-                    <p>Dashboard auto-refreshes every 30 seconds</p>
-                </div>
-            </div>
-            
-            <script>
-                // Auto-refresh every 30 seconds
-                setTimeout(function() {{
-                    window.location.reload();
-                }}, 30000);
-            </script>
-        </body>
-        </html>
-        """
-        
-        return html
-    
-    def generate_chart_html(self, charts):
-        """Generate HTML for charts"""
-        chart_html = ""
-        
-        if 'performance_dashboard' in charts:
-            chart_html += f"""
-            <div class="chart-container">
-                <h3>Model Performance Dashboard</h3>
-                <img src="data:image/png;base64,{charts['performance_dashboard']}" style="width: 100%;" alt="Performance Dashboard">
-            </div>
-            """
-        
-        if 'confidence_timeline' in charts:
-            chart_html += f"""
-            <div class="chart-container">
-                <h3>Prediction Confidence Timeline</h3>
-                <img src="data:image/png;base64,{charts['confidence_timeline']}" style="width: 100%;" alt="Confidence Timeline">
-            </div>
-            """
-        
-        if 'metrics_summary' in charts:
-            chart_html += f"""
-            <div class="chart-container">
-                <h3>Model Metrics Summary</h3>
-                <img src="data:image/png;base64,{charts['metrics_summary']}" style="width: 100%;" alt="Metrics Summary">
-            </div>
-            """
-        
-        return chart_html
-    
-    def start_auto_monitor(self):
-        """Start automatic monitoring"""
-        self.start_visualizer()
-        print("✅ Auto-visualizer started! Performance dashboard is now active.")
+# AutoVisualizer removed for Hugging Face deployment (background servers and browser launches are not allowed)
 
-def start_auto_visualizer():
-    """Function to start the visualizer"""
-    auto_visualizer = AutoVisualizer()
-    auto_visualizer.start_auto_monitor()
+if __name__ == "__main__":
+    port = int(os.environ.get("PORT", 7860))
 
-if __name__ == '__main__':
-    port = int(os.getenv('TOI_MODEL_PORT', 5001))
-    debug = os.getenv('FLASK_DEBUG', 'False').lower() == 'true'
-    
-    print(f"🚀 Starting TOI Model Server on port {port}")
-    print(f"📊 Model ready: {model.is_trained if model else False}")
-    
-    # Start auto visualizer
-    start_auto_visualizer()
-    
-    app.run(host='0.0.0.0', port=port, debug=debug)
+    print("🚀 Starting TOI Model API (Hugging Face compatible)")
+    print(f"📊 Model loaded: {model.is_trained if model else False}")
+    print(f"🌐 Listening on port {port}")
+
+    app.run(
+        host="0.0.0.0",
+        port=port,
+        debug=False
+    )
